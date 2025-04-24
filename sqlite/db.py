@@ -1,0 +1,53 @@
+import sqlite3
+import os
+
+path_db = os.path.join(os.path.dirname(__file__),"saved_data.sqlite")
+
+
+def setup_database():
+    conn = sqlite3.connect(path_db)
+    cur = conn.cursor()
+
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS sent_data (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        topic TEXT,
+        description TEXT,
+        phone INTEGER,
+        email TEXT,
+        company TEXT,
+        name TEXT,
+        tg_username TEXT,
+        attachment INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+''')
+    conn.commit()
+    conn.close()
+    print("Table 'sent_data' created") 
+
+
+def add_to_database(user_data,update,flag):
+    conn = sqlite3.connect(path_db)
+    cur = conn.cursor()
+
+    cur.execute('''
+    INSERT INTO sent_data (topic, description, phone, email, company, name, tg_username,attachment)
+    VALUES (?,?,?,?,?,?,?,?)
+''', (
+    user_data.get("название задачи", ""),
+    user_data.get("описание задачи", ""),
+    user_data.get("номер телефона", ""),
+    user_data.get("электронная почта", ""),
+    user_data.get("название компании и название отдела", ""),
+    user_data.get("имя и фамилия", ""),
+    update.message.chat.username,
+    flag
+))
+    conn.commit()
+    conn.close()
+    print("User data added to table 'sent_data' ")
+
+
+
+setup_database()

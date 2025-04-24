@@ -1,18 +1,20 @@
 import logging
 import re
 import os
-import requests
-import pandas as pd
+import sys
 
 from email_validator import validate_email, EmailNotValidError
 from dotenv import load_dotenv
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from telegram.helpers import escape_markdown
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from telegram.ext.filters import Text
 
+path_to_db = os.path.abspath(os.path.join(os.path.dirname(__file__),"sqlite"))
+sys.path.append(path_to_db)
+
 from api import create_issue
+from db import setup_database, add_to_database
 
 '''
 logging.basicConfig(
@@ -60,6 +62,7 @@ def save_data(data):
     df.to_csv(CSV_FILE, index=False, encoding="utf-8")
     print("data_saved")
 
+#using regular expression to accept only russian phones
 def validate_phone_number(phone_number):
     pattern = r"^(?:\+7|8)(?:[-.\s]|\s*\(\s*)?\d{3}(?:\s*\)?[-.\s]|\s*\)\s*)?\d{3}(?:[-.\s])?\d{2}(?:[-.\s])?\d{2}$"
 
@@ -69,7 +72,8 @@ def validate_phone_number(phone_number):
     else:
         print("Неверный номер телефона")
         return False
-    
+#using regular expression to accept only valid email address
+#email_validator lib checks domain using dns
 def validate_email_(email):
     pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
     if re.match(pattern,email) and validate_email(email,check_deliverability=True):
@@ -139,13 +143,13 @@ def is_email_valid(email):
 #start works on starting bot and entering /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print(f"@{update.message.chat.username} начал бота")
-    await context.bot.send_message(chat_id = update.effective_chat.id, text=f"Здарвствуйте, {update.message.chat.first_name}! я создам вам задачу в системе Jira.",reply_markup=start_keys)
+    await context.bot.send_message(chat_id = update.effective_chat.id, text=f"Здарвствуйте, {update.message.chat.first_name}! Я создам вам задачу в системе Jira.",reply_markup=start_keys)
 
 #starts on entering /new_task and typing "start new task"
 #the cycle of getting data works automatically check conv_handler at the end
 async def new_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("new_task")
-    await update.message.reply_text(f"Пожалуйста, введите название задачи",reply_markup=skip_keys)
+    await update.message.reply_text(f"Пожалуйста, введите название задачи\nПример: Миграция серверов",reply_markup=skip_keys)
     return TOPIC
 
 #in each get_<> there is skip option that was hardcoded
@@ -153,14 +157,18 @@ async def get_topic (update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text.strip()
     if user_input.lower() == "пропустить поле":
         #if user whats to skip bot goes to next stage, skipping this one
-        print("пользователь пропустил поле get_topic")
-        await update.message.reply_text(f"Пожалуйста, введите описание задачи",reply_markup=skip_keys)
+        print(f"@{update.message.chat.username}  пропустил поле get_topic")
+        await update.message.reply_text(f"Пожалуйста, введите описание задачи\nПример: Миграция серверов с помощью Ansible",reply_markup=skip_keys)
         return DESCRIPTION
+        
+        
+        #because this bot uses conversation handler, he prints to user what info to enter 1 #stage earlier then that info will be saved.
+        #each new stage firslty wait for user input then continues to what is coded
     else:
         print("get_topic")
         user_input = update.message.text.strip()
         context.user_data["название задачи"] = user_input
-        await update.message.reply_text(f"Пожалуйста, введите описание задачи",reply_markup=skip_keys)
+        await update.message.reply_text(f"Пожалуйста, введите описание задачи\nПример: Миграция серверов с помощью Ansible",reply_markup=skip_keys)
     
     return DESCRIPTION
 
@@ -168,14 +176,14 @@ async def get_topic (update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text.strip()
     if "пропустить поле" in user_input.lower():
-        print("пользователь пропустил поле get_description ")
-        await update.message.reply_text(f"Пожалуйста, введите номер телефона",reply_markup=skip_keys)
+        print(f"@{update.message.chat.username}  пропустил поле get_description ")
+        await update.message.reply_text(f"Пожалуйста, введите номер телефона\nПример: 81234567890",reply_markup=skip_keys)
         return PHONE
     else: 
         print("get_description")
         user_input = update.message.text.strip()
         context.user_data["описание задачи"] = user_input
-        await update.message.reply_text(f"Пожалуйста, введите номер телефона",reply_markup=skip_keys)
+        await update.message.reply_text(f"Пожалуйста, введите номер телефона\nПример: 81234567890",reply_markup=skip_keys)
     
     return PHONE
 
@@ -184,8 +192,8 @@ async def get_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text.strip()
     if "пропустить поле" in user_input.lower():
-        print("пользователь пропустил поле get_phone ")
-        await update.message.reply_text(f"Пожалуйста, введите электронную почту",reply_markup=skip_keys)
+        print(f"@{update.message.chat.username}  пропустил поле get_phone ")
+        await update.message.reply_text(f"Пожалуйста, введите электронную почту\nПример: ivan_01@mail.ru",reply_markup=skip_keys)
         return EMAIL
          
     else:  
@@ -193,12 +201,12 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_input = update.message.text.strip()
         if validate_phone_number(user_input):
             context.user_data["номер телефона"] = user_input
-            await update.message.reply_text(f"Пожалуйста, введите электронную почту",reply_markup=skip_keys)
+            await update.message.reply_text(f"Пожалуйста, введите электронную почту\nПример: ivan_01@mail.ru",reply_markup=skip_keys)
             return EMAIL
 
         else:    
             await update.message.reply_text(
-                text="Пожалуйста, введите корректный номер телефона",
+                text="Неверная номер телефона!\nПожалуйста, введите корректный номер телефонаn\nПример: 81234567890 ",
                 reply_markup=skip_keys
             )
             return PHONE
@@ -208,31 +216,31 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text.strip()
     if "пропустить поле" in user_input.lower():
-        print("пользователь пропустил поле get_email ")
-        await update.message.reply_text(f"Пожалуйста, введите название компании и название отдела",reply_markup=skip_keys)
+        print(f"@{update.message.chat.username}  пропустил поле get_email ")
+        await update.message.reply_text(f"Пожалуйста, введите название компании и название отдела\nПример: ООО Орешки, отдел IT",reply_markup=skip_keys)
         return DEPARTMENT
     else:
         print("get_email")
         user_input = update.message.text.strip()
         if validate_email_(user_input):
             context.user_data["электронная почта"] = user_input
-            await update.message.reply_text(f"Пожалуйста, введите название компании и название отдела",reply_markup=skip_keys)
+            await update.message.reply_text(f"Пожалуйста, введите название компании и название отдела\nПример: ООО Орешки, отдел IT",reply_markup=skip_keys)
             return DEPARTMENT
         else:
-            await update.message.reply_text(f"Неверная почта\Пожалуйста проверите и введите корректный электронную почту")
+            await update.message.reply_text(f"Неверная почта!\nПожалуйста проверите и введите корректный электронную почту\nПример: ivan_01@mail.ru")
             return EMAIL
 
 async def get_department(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text.strip()
     if "пропустить поле" in user_input.lower():
-        print("пользователь пропустил поле get_department")
-        await update.message.reply_text(f"Пожалуйста, введите имя и фамилию",reply_markup=skip_keys)
+        print(f"@{update.message.chat.username}  пропустил поле get_department")
+        await update.message.reply_text(f"Пожалуйста, введите имя и фамилию\nПример: Иван Иванов",reply_markup=skip_keys)
         return NAME
     else:
         print("get_department")
         user_input = update.message.text.strip()
         context.user_data["название компании и название отдела"] = user_input
-        await update.message.reply_text(f"Пожалуйста, введите имя и фамилию",reply_markup=skip_keys)
+        await update.message.reply_text(f"Пожалуйста, введите имя и фамилию\nПример: Иван Иванов",reply_markup=skip_keys)
         return NAME
 
 #Because this code uses conversation handler on entering new stage bot waits for user input
@@ -241,7 +249,7 @@ async def get_department(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text.strip()
     if "пропустить поле" in user_input.lower():
-        print("пользователь пропустил поле get_name")
+        print(f"@{update.message.chat.username}  пропустил поле get_name")
         print("data proccessing")
         data_display = "Введенные данные:\n"
         fields = ["название задачи", "описание задачи", "номер телефона", "электронная почта", "название компании и название отдела", "имя и фамилия"]
@@ -284,23 +292,26 @@ async def confirm_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 context.user_data[field]
             except KeyError as e:
-                print(e)
+                print(f"@{update.message.chat.username} не заполнил поле: {e}")
                 empty_fields.append(e)
                 await update.message.reply_text(
                 f"Поле {e} не заполнено")
             
         #if there are empty fields, then user have to fill them
         if empty_fields:
-            print(f"User didnt fill: {empty_fields}")
+            #print(f"User didnt fill: {empty_fields}")
             keyboard = [[KeyboardButton("Редактировать данные"),KeyboardButton("Отмена задачи")]]
             reply_markup = ReplyKeyboardMarkup(keyboard,resize_keyboard=True, one_time_keyboard=True)
             await update.message.reply_text(
-            f"Некоторые поля не заполнены, пожалуйста заполните их",
+            f"Перед отправкой надо заполнить все поля, пожалуйста заполните пустые поля",
             reply_markup=reply_markup)
             return CONFIRM
         # if there isnt empty fields then continue to save
         else:
             print("Saving")
+            keyboard = [[KeyboardButton("Да!"),KeyboardButton("Отмена задачи")]]
+            reply_markup = ReplyKeyboardMarkup(keyboard,resize_keyboard=True, one_time_keyboard=True)
+            await update.message.reply_text("Создать задачю в Jira?",reply_markup=reply_markup)
             return SAVE 
             
     elif user_input == "редактировать данные":
@@ -406,30 +417,29 @@ async def redact_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 #Saving data stage
 async def handle_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    attachment_flag = 0
     print("handle_save")
-    save_data(context.user_data)
-    await update.message.reply_text(
-        "Data saved!!!",
-        reply_markup=ReplyKeyboardRemove()
-    )
+    setup_database()
     #JIRA Create issue
-    
-    try:#sending saved data to jira
-        issue = create_issue(
-            project_key= "TEMT",
-            summary = context.user_data["название задачи"],
-            description = f"описание задачи: {context.user_data["описание задачи"]}\nномер телефона: {context.user_data["номер телефона"]}\nэлектронная почта: {context.user_data["электронная почта"]}\nназвание компании и название отдела: {context.user_data["название компании и название отдела"]}\nимя и фамилия: {context.user_data["имя и фамилия"]}\nTelegram username: @{update.message.chat.username}\nTelegram name: {update.message.chat.first_name, update.message.chat.last_name}",
-            issue_type = "Задача"
-            )
+    #sending saved data to jira
+    issue_key, error_msg  = create_issue(
+        project_key= "TEMT",
+        summary = context.user_data["название задачи"],
+        description = f"описание задачи: {context.user_data["описание задачи"]}\nномер телефона: {context.user_data["номер телефона"]}\nэлектронная почта: {context.user_data["электронная почта"]}\nназвание компании и название отдела: {context.user_data["название компании и название отдела"]}\nимя и фамилия: {context.user_data["имя и фамилия"]}\nTelegram username: @{update.message.chat.username}\nTelegram имя: {update.message.chat.first_name, update.message.chat.last_name}",
+        issue_type = "Задача"
+        )
+    if issue_key is not None:
         #prints issue key to user
-        await update.message.reply_text(f"Task successfuly created at Jira\nIssue key: {issue}")
-    
-    except requests.exceptions.HTTPError as e:
-        await context.bot.send_message(chat_id = update.effective_chat.id,text=f"Error creating task at Jira")
+        await update.message.reply_text(f"Задача создана успешно\nIssue key: {issue_key}")
+        add_to_database(context.user_data, update, attachment_flag)
+    #if error, prints error to user
+    else:
+        await update.message.reply_text(f"Возникла ошибка при создание задачи в Jira: \n'{error_msg}'") 
+        await update.message.reply_text(f"Пожалуйста попробуйте еще раз позже")
     
     #ends conversation cycle
     await update.message.reply_text(
-        "What would you like to do next?",
+        "Что будем делать дальше?",
         reply_markup=start_keys
     )
     context.user_data.clear()
