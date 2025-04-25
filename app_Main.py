@@ -2,6 +2,7 @@ import logging
 import re
 import os
 import sys
+import io
 
 from email_validator import validate_email, EmailNotValidError
 from dotenv import load_dotenv
@@ -13,7 +14,7 @@ from telegram.ext.filters import Text
 path_to_db = os.path.abspath(os.path.join(os.path.dirname(__file__),"sqlite"))
 sys.path.append(path_to_db)
 
-from api import create_issue
+from api import create_issue, upload_attachment
 from db import setup_database, add_to_database
 
 '''
@@ -27,9 +28,10 @@ load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 
-CSV_FILE = 'list.csv'
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 
-TOPIC, DESCRIPTION, PHONE, EMAIL, DEPARTMENT, NAME, CONFIRM, REDACT, SAVE = range(9)
+
+TOPIC, DESCRIPTION, PHONE, EMAIL, DEPARTMENT, NAME, CONFIRM, REDACT, SAVE, MEDIA, DECISION = range(11)
 
 
 
@@ -53,14 +55,7 @@ redact_keys = ReplyKeyboardMarkup([[KeyboardButton('Редактировать �
                 [KeyboardButton('Отмена задачи')]], resize_keyboard=True, one_time_keyboard=True)
 
 save_keys = ReplyKeyboardMarkup([[KeyboardButton("Да"), KeyboardButton("Редактировать данные"), KeyboardButton("Отмена задачи")]], resize_keyboard=True, one_time_keyboard=True)
-
-
-def save_data(data):
-    df = pd.DataFrame([data])
-    ex_df = pd.read_csv(CSV_FILE)
-    df = pd.concat([ex_df, df], ignore_index=True)
-    df.to_csv(CSV_FILE, index=False, encoding="utf-8")
-    print("data_saved")
+ 
 
 #using regular expression to accept only russian phones
 def validate_phone_number(phone_number):
@@ -92,26 +87,6 @@ fields_dictionary = {
     "name": "имя и фамилия"
 }
 
-'''
-def unfilled_fields_exist(context:ContextTypes.DEFAULT_TYPE):
-    fields = ["topic","description","phone","email","department","name"]
-    unfilled_fields = [field for field in fields if context.user_data.get(field,"empty") in ("empty","")]
-    return unfilled_fields
-
-def temp(data):
-    lines = data.splitlines()
-    for line in lines:
-        print(line)
-
-
-def data_not_empty(context:ContextTypes.DEFAULT_TYPE):
-    fields = ["topic","description","phone","email","department","name"]
-    for i in fields:
-        try:
-            context.user_data[i]
-        except KeyError as e:
-            print(e)
-'''
 
 class CancelFilter(Text):
     def check_update(self, update):
@@ -120,22 +95,6 @@ class CancelFilter(Text):
         text = update.message.text.strip().lower()
         return text != "отмена задачи"
     
-'''
-class SkipFilter(Text):
-    def check_update(self, update):
-        if not update.message or not update.message.text:
-            return False
-        text = update.message.text.strip().lower()
-        return text != "skip"
-'''
-
-
-def is_email_valid(email):
-    try :
-        validate_email(email,check_deliverability=True)
-    except EmailNotValidError as e:
-        print(e)
-        return False
 
 
 
@@ -156,14 +115,14 @@ async def new_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_topic (update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text.strip()
     if user_input.lower() == "пропустить поле":
-        #if user whats to skip bot goes to next stage, skipping this one
+        #if user whats to skip bot goes to next state, skipping this one
         print(f"@{update.message.chat.username}  пропустил поле get_topic")
         await update.message.reply_text(f"Пожалуйста, введите описание задачи\nПример: Миграция серверов с помощью Ansible",reply_markup=skip_keys)
         return DESCRIPTION
         
         
-        #because this bot uses conversation handler, he prints to user what info to enter 1 #stage earlier then that info will be saved.
-        #each new stage firslty wait for user input then continues to what is coded
+        #because this bot uses conversation handler, he prints to user what info to enter 1 #state earlier then that info will be saved.
+        #each new state firslty wait for user input then continues to what is coded
     else:
         print("get_topic")
         user_input = update.message.text.strip()
@@ -243,30 +202,40 @@ async def get_department(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Пожалуйста, введите имя и фамилию\nПример: Иван Иванов",reply_markup=skip_keys)
         return NAME
 
-#Because this code uses conversation handler on entering new stage bot waits for user input
-#so requirements for user input are given to user one stage earlier
-#so first bot send whats data to enter then goes to that stage and waits for user input
+#Because this code uses conversation handler on entering new state bot waits for user input
+#so requirements for user input are given to user one state earlier
+#so first bot send whats data to enter then goes to that state and waits for user input
 async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text.strip()
     if "пропустить поле" in user_input.lower():
         print(f"@{update.message.chat.username}  пропустил поле get_name")
-        print("data proccessing")
-        data_display = "Введенные данные:\n"
-        fields = ["название задачи", "описание задачи", "номер телефона", "электронная почта", "название компании и название отдела", "имя и фамилия"]
-        for field in fields:
-            value = context.user_data.get(field,"пусто")
-            data_display += f"{field.capitalize()}: {value}\n"
-            
-        await update.message.reply_text(data_display)
-        await update.message.reply_text("Хотите сохранить данные?", reply_markup=save_keys)
-        return CONFIRM
+
+        context.user_data['attachment_flag'] = 0
+        keyboard = [[KeyboardButton("Да"),KeyboardButton("Нет")]]
+        reply_markup = ReplyKeyboardMarkup(keyboard,resize_keyboard=True, one_time_keyboard=True)
+        await update.message.reply_text("Хотите прикрепить вложение к заданию?",reply_markup=reply_markup)
+        return DECISION
     else:
         print("get_name")
         user_input = update.message.text.strip()
         context.user_data["имя и фамилия"] = user_input
         
+
+        context.user_data['attachment_flag'] = 0
+        keyboard = [[KeyboardButton("Да"),KeyboardButton("Нет")]]
+        reply_markup = ReplyKeyboardMarkup(keyboard,resize_keyboard=True, one_time_keyboard=True)
+        await update.message.reply_text("Хотите прикрепить вложение к заданию?",reply_markup=reply_markup)
+        return DECISION
         
-        
+#Asking if user wanna attach document or photo
+async def decision_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("decision handler")
+    user_input = update.message.text.strip().lower()
+    if user_input == "да":
+        await update.message.reply_text("Отправьте фото или документ размером меньше 10МБ",reply_markup=ReplyKeyboardRemove())
+        return MEDIA
+    
+    elif user_input == "нет":
         #prints entered data to user and waits order what to do with that data
         print("data proccessing")
         data_display = "Введенные данные:\n"
@@ -278,6 +247,70 @@ async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(data_display)
         await update.message.reply_text("Хотите сохранить данные?", reply_markup=save_keys)
         return CONFIRM
+    else:
+        await update.message.reply_text("Пожалуйста выберите 'Да' или 'Нет'.")
+        return DECISION
+
+
+# Handler for attachments
+async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("handle media")
+    if update.message.document:
+        print("user sent document")
+        file = await update.message.document.get_file()
+        file_size = update.message.document.file_size  
+        file_name = update.message.document.file_name
+        print(1)
+    # Check if the message contains a photo
+    elif update.message.photo:
+        print("user sent photo")
+        # Get the highest resolution photo
+        file = await update.message.photo[-1].get_file()
+        file_size = update.message.photo[-1].file_size  
+        file_name = f"photo_{update.message.message_id}.jpg"  
+        print(2)
+    else:
+        await update.message.reply_text("Пожалуйста, отправь документ или фото.")
+        print(3)
+        return MEDIA
+
+    # Check file size
+    if file_size > MAX_FILE_SIZE:
+        print(4)
+        await update.message.reply_text(
+            f"Файл слишком большой! Размер: {file_size / 1024 / 1024:.2f} МБ.\n"
+            f"Максимальный размер: 10 МБ."
+        )
+        return MEDIA
+    print(5)
+    try:
+        # Download the file
+        file_bytes = await file.download_as_bytearray()
+        file_stream = io.BytesIO(file_bytes)
+        file_stream.name = file_name
+
+        context.user_data['attachment_stream'] = file_stream
+        context.user_data['attachment_name'] = file_name
+        context.user_data['attachment_flag'] = 1
+
+        await update.message.reply_text(f"Файл получен! Размер: {file_size / 1024 / 1024:.2f} МБ. ")
+        
+        print("data proccessing")
+        data_display = "Введенные данные:\n"
+        fields = ["название задачи", "описание задачи", "номер телефона", "электронная почта", "название компании и название отдела", "имя и фамилия"]
+        for field in fields:
+            value = context.user_data.get(field,"пусто")
+            data_display += f"{field.capitalize()}: {value}\n"
+            
+        await update.message.reply_text(data_display)
+        await update.message.reply_text("Хотите сохранить данные?", reply_markup=save_keys)
+        return CONFIRM
+    
+
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка при загрузке файла {e}")
+        print(f"file download error {e}")
+        return MEDIA
 
 
 #User needs to confirm saving data before saving
@@ -324,7 +357,7 @@ async def confirm_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         # Invalid input
         await update.message.reply_text(
-            text="Пожалуйста выберите 'Да', 'Редактировать данные', или 'Отмена задачи'.",
+            "Пожалуйста выберите 'Да', 'Редактировать данные', или 'Отмена задачи'.",
             reply_markup=save_keys
         )
         return CONFIRM
@@ -415,9 +448,8 @@ async def redact_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return REDACT  
         
 
-#Saving data stage
+#Saving data 
 async def handle_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    attachment_flag = 0
     print("handle_save")
     setup_database()
     #JIRA Create issue
@@ -425,13 +457,21 @@ async def handle_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     issue_key, error_msg  = create_issue(
         project_key= "TEMT",
         summary = context.user_data["название задачи"],
-        description = f"описание задачи: {context.user_data["описание задачи"]}\nномер телефона: {context.user_data["номер телефона"]}\nэлектронная почта: {context.user_data["электронная почта"]}\nназвание компании и название отдела: {context.user_data["название компании и название отдела"]}\nимя и фамилия: {context.user_data["имя и фамилия"]}\nTelegram username: @{update.message.chat.username}\nTelegram имя: {update.message.chat.first_name, update.message.chat.last_name}",
-        issue_type = "Задача"
+        description = f"описание задачи: {context.user_data["описание задачи"]}\nномер телефона: {context.user_data["номер телефона"]}\nэлектронная почта: {context.user_data["электронная почта"]}\nназвание компании и название отдела: {context.user_data["название компании и название отдела"]}\nимя и фамилия: {context.user_data["имя и фамилия"]}\nTelegram username: @{update.message.chat.username}\nTelegram имя: {update.message.chat.first_name, update.message.chat.last_name}"
         )
     if issue_key is not None:
         #prints issue key to user
         await update.message.reply_text(f"Задача создана успешно\nIssue key: {issue_key}")
-        add_to_database(context.user_data, update, attachment_flag)
+        add_to_database(context.user_data, update)
+        #if attachment was added sends it to created issue
+        if context.user_data.get('attachment_flag') == 1:
+            file_stream = context.user_data['attachment_stream']
+            file_name = context.user_data['attachment_name']
+            attachment_error = upload_attachment(issue_key, file_stream, file_name)
+            if attachment_error:
+                await update.message.reply_text(f"Не удалось прикрепить файл:\n{attachment_error}")
+            file_stream.close()#close the stream to free memory
+
     #if error, prints error to user
     else:
         await update.message.reply_text(f"Возникла ошибка при создание задачи в Jira: \n'{error_msg}'") 
@@ -468,9 +508,10 @@ def main():
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("new_task", new_task),
                       MessageHandler(filters.Regex('(?i)^начать новую задачу$'), new_task)],
-        #each stage triggers once have been called
-        #all stages have cancel filter so that when user whats to cancel the data will be
+        #each state triggers once have been called
+        #all states have cancel filter so that when user whats to cancel the data will be
         #forgoten and conv handler will be exited
+        #order of states in conv_handler doesnt matter
         states={
             TOPIC: [MessageHandler(CancelFilter() & ~filters.COMMAND, get_topic)],
             DESCRIPTION: [MessageHandler(CancelFilter() & ~filters.COMMAND, get_description)],
@@ -480,7 +521,9 @@ def main():
             NAME: [MessageHandler(CancelFilter() & ~filters.COMMAND, get_name)],
             CONFIRM : [MessageHandler(CancelFilter() & ~filters.COMMAND, confirm_data)],
             SAVE: [MessageHandler(CancelFilter() & ~filters.COMMAND, handle_save)],
-            REDACT: [MessageHandler(CancelFilter() & ~filters.COMMAND, redact_data)]
+            REDACT: [MessageHandler(CancelFilter() & ~filters.COMMAND, redact_data)],
+            MEDIA: [MessageHandler(filters.Document.ALL | filters.PHOTO, handle_media)],
+            DECISION: [MessageHandler(CancelFilter() & ~filters.COMMAND, decision_handler)]
         },
         fallbacks=[CommandHandler("cancel", cancel), MessageHandler(filters.Regex('(?i)^Отмена задачи$'), cancel)]
     )
@@ -490,6 +533,7 @@ def main():
     start_handler = CommandHandler("start", start)  
     help_handler = CommandHandler("help", help)
     helpp_handler = MessageHandler(filters.Regex('(?i)^need help$'), help)
+    handle_media_handler = CommandHandler("handle_media", handle_media)
     #redact_data_handler = MessageHandler(filters.Regex('(?i)^redact_data$'), redact_data)
     #cancel_handler = MessageHandler(filters.Regex('(?i)^cancel$'), cancel)
 
@@ -498,6 +542,7 @@ def main():
     app.add_handler(start_handler)
     app.add_handler(help_handler)
     app.add_handler(helpp_handler)
+    app.add_handler(handle_media_handler)
     #app.add_handler(redact_data_handler)
     #app.add_handler(cancel_handler)
     app.add_handler(conv_handler)

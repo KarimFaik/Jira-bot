@@ -27,7 +27,7 @@ def setup_database():
     print("Table 'sent_data' created") 
 
 
-def add_to_database(user_data,update,flag):
+def add_to_database(user_data,update):
     conn = sqlite3.connect(path_db)
     cur = conn.cursor()
 
@@ -42,7 +42,7 @@ def add_to_database(user_data,update,flag):
     user_data.get("название компании и название отдела", ""),
     user_data.get("имя и фамилия", ""),
     update.message.chat.username,
-    flag
+    user_data.get("attachment_flag", "")
 ))
     conn.commit()
     conn.close()
