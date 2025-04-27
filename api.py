@@ -1,8 +1,14 @@
 import requests
 from requests.exceptions import HTTPError, ConnectionError, Timeout
 import json
+import sys
 import os
 from dotenv import load_dotenv
+
+path_to_logs = os.path.abspath(os.path.join(os.path.dirname(__file__),"logs"))
+sys.path.append(path_to_logs)
+from logs_ctrl import logger
+
 #loading variables from .env file
 load_dotenv()
 
@@ -33,14 +39,14 @@ def create_issue(project_key, summary, description, issue_type=type_of_issue, co
         response = requests.post(url, headers=headers, json=payload)
         response.raise_for_status()
         issue_data = response.json()
-        print("Issue created")
-        print(json.dumps(issue_data, indent = 2))
+        logger.info(f"Задачя создана")
+        logger.info(f"{json.dumps(issue_data, indent = 2)}")
         issue_key = issue_data['key']
         return issue_key, None
 
  
     except HTTPError as e:
-        print(f"HTTP error occurred: {e}")
+        logger.error(f"HTTP error occurred: {e}")
         # Handle specific HTTP errors
         if response.status_code == 400:
             error_msg= "Bad Request: Check your input data."
@@ -54,17 +60,17 @@ def create_issue(project_key, summary, description, issue_type=type_of_issue, co
             error_msg = "Server Error: Please try again later."
         return None, error_msg  
     except ConnectionError as conn_err:
-        print(f"Connection error occurred: {conn_err}")
+        logger.error(f"Connection error occurred: {conn_err}")
         error_msg = "Connection error occurred."
         return None, error_msg  
 
     except Timeout as timeout_err:
-        print(f"Timeout error occurred: {timeout_err}")
+        logger.error(f"Timeout error occurred: {timeout_err}")
         error_msg = "The request timed out. Try increasing the timeout or try again later."
         return None, error_msg  
     
     except Exception as err:
-         print(f"An unexpected error occurred: {err}")
+         logger.error(f"An unexpected error occurred: {err}")
          error_msg = f"An unexpected error occurred: {err}"
          return None, error_msg  
 
@@ -87,36 +93,11 @@ def upload_attachment(issue_key, file_stream, file_name):
             files=files
         )
         attachment_response.raise_for_status()
-        print(f"Attachment {file_name} added to issue {issue_key}")
+        logger.info(f"Attachment {file_name} added to issue {issue_key}")
         return None
     except HTTPError as e:
-        print(f"Failed to attach file to issue {issue_key}: {e}")
+        logger.error(f"Failed to attach file to issue {issue_key}: {e}")
         return issue_key, f"Ошибка при прикреплении файла: {e}"
 
     finally:
         file_stream.close()  # Close the stream to free memory
-
-
-#example to try
-'''
-create_issue(
-        project_key= "TEMT",
-        summary = "Probnaya  2",
-        description = f"prosto 2",
-        issue_type = "Задача")
-
-from io import BytesIO
-issue_key = "TEMT-37"
-file_content =  b"test for uploading issue attachment"
-file_stream = BytesIO(file_content)
-file_name = "random.pdf"
-
-attachment_error = upload_attachment(
-    issue_key, file_stream, file_name
-)
-if attachment_error :
-    print("ERROR")
-else:
-    print("LOL")
-file_stream.close()
-'''

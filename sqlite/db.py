@@ -1,5 +1,10 @@
 import sqlite3
+import sys
 import os
+
+path_to_logs = os.path.abspath(os.path.join(os.path.dirname(__file__),"logs"))
+sys.path.append(path_to_logs)
+from logs_ctrl import logger
 
 path_db = os.path.join(os.path.dirname(__file__),"saved_data.sqlite")
 
@@ -24,7 +29,7 @@ def setup_database():
 ''')
     conn.commit()
     conn.close()
-    print("Table 'sent_data' created") 
+    logger.info("Таблица 'sent_data' существует") 
 
 
 def add_to_database(user_data,update):
@@ -46,7 +51,7 @@ def add_to_database(user_data,update):
 ))
     conn.commit()
     conn.close()
-    print("User data added to table 'sent_data' ")
+    logger.info("Данные добавленны в таблицу 'sent_data'")
 
 
 
