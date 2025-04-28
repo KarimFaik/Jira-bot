@@ -75,9 +75,6 @@ def create_issue(project_key, summary, description, issue_type=type_of_issue, co
          return None, error_msg  
 
 def upload_attachment(issue_key, file_stream, file_name):
-    #file_stream = context.user_data['attachment_stream']
-    #file_name = context.user_data['attachment_name']
-
     # Attach the file to the Jira issue
     attachment_url = f"{JIRA_URL}/rest/api/2/issue/{issue_key}/attachments"
     attachment_headers = {
