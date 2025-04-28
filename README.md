@@ -54,12 +54,6 @@ JiraBot — это Telegram-бот, который позволяет польз
    cp .env.dict .env
    ```
    Заполните `.env` вашими данными:
-   ```
-   JIRA_TOKEN="your_jira_api_token"
-   JIRA_URL="https://your-jira-instance.atlassian.net"
-   TELEGRAM_BOT_TOKEN="your_telegram_bot_token"
-   JIRA_PROJECT_TOKEN="your_jira_project_key"
-   ```
 
 5. **Запустите бота**:
    ```bash
