@@ -492,7 +492,7 @@ async def handle_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 #just little help
 async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"Commands:\n /new_task: start a new task. ")
+    await update.message.reply_text(f"Я создаю задачи в системе Jira и могу прикрепить к ним вложение размером не более 10МБ.\nКоманды:\n /new_task: создает новую задачу в системи Jira. ")
     logger.info(f"Пользователь {update.message.chat.username} воспользовался командой 'помощь'")
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):

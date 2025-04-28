@@ -1,6 +1,3 @@
 __pycache__
 .env
 venv
-test.py
-list.csv
-saved_data.sqlite
