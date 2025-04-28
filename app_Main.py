@@ -454,7 +454,6 @@ async def handle_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     #JIRA Create issue
     #sending saved data to jira
     issue_key, error_msg  = create_issue(
-        project_key= "TEMT",
         summary = context.user_data["название задачи"],
         description = f"описание задачи: {context.user_data["описание задачи"]}\nномер телефона: {context.user_data["номер телефона"]}\nэлектронная почта: {context.user_data["электронная почта"]}\nназвание компании и название отдела: {context.user_data["название компании и название отдела"]}\nимя и фамилия: {context.user_data["имя и фамилия"]}\nTelegram username: @{update.message.chat.username}\nTelegram имя: {update.message.chat.first_name, update.message.chat.last_name}"
         )

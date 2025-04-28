@@ -2,3 +2,4 @@ __pycache__
 .env
 venv
 saved_data.sqlite
+bot.log
