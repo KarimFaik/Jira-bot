@@ -102,15 +102,15 @@ JiraBot — это Telegram-бот, который позволяет польз
 ```
 jirabot/
 ├── logs/                  # Логи (создаются автоматически)
+    ├── logs_ctrl.py           # Настройка логирования
 ├── sqlite/                # SQLite база данных (создается автоматически)
+    ├── db.py                  # Логика работы с SQLite
 ├── .dockerignore          # Игнорируемые файлы для Docker
 ├── .gitignore             # Игнорируемые файлы для Git
 ├── .env.dict              # Пример файла .env
 ├── api.py                 # Логика работы с Jira API
 ├── app_Main.py            # Основной файл бота (Telegram логика)
-├── db.py                  # Логика работы с SQLite
 ├── Dockerfile             # Конфигурация Docker
-├── logs_ctrl.py           # Настройка логирования
 ├── README.md              # Документация
 ├── requirements.txt       # Зависимости
 ```
